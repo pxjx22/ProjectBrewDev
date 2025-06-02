@@ -51,7 +51,7 @@ Project BrewDev: V1 Component Checklist
 
 { } [K-Type Thermocouple Probe (ensure you have one compatible with the MAX31855)](https://www.aliexpress.com/item/1005005496786289.html?spm=a2g0o.productlist.main.1.7dd9236fusXsxI&algo_pvid=d2b3cf6a-636d-4870-9a61-269e426183fa&algo_exp_id=d2b3cf6a-636d-4870-9a61-269e426183fa-0&pdp_ext_f=%7B%22order%22%3A%22906%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%213.27%212.91%21%21%212.07%211.84%21%402103245417487774616223073e1561%2112000033327476707%21sea%21AU%213080408886%21X&curPageLogUid=iCr16ZWSsp3i&utparam-url=scene%3Asearch%7Cquery_from%3A)(Note:Ensure you pick k-type m4)
 
-[MAX31855 amplifier](https://www.aliexpress.com/item/1902975189.html?spm=a2g0o.productlist.main.1.428e287cNdxcZy&algo_pvid=3b100b3c-6b06-4296-a7df-7b496b6c2fbe&algo_exp_id=3b100b3c-6b06-4296-a7df-7b496b6c2fbe-0&pdp_ext_f=%7B%22order%22%3A%2270%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%212.86%212.86%21%21%211.81%211.81%21%402103244b17487820073372535e03d5%2112000018875273580%21sea%21AU%213080408886%21X&curPageLogUid=gbY9soG79bIv&utparam-url=scene%3Asearch%7Cquery_from%3A)  
+{ } [MAX31855 Thermocouple Sensor Module](https://www.aliexpress.com/item/1902975189.html?spm=a2g0o.productlist.main.1.428e287cNdxcZy&algo_pvid=3b100b3c-6b06-4296-a7df-7b496b6c2fbe&algo_exp_id=3b100b3c-6b06-4296-a7df-7b496b6c2fbe-0&pdp_ext_f=%7B%22order%22%3A%2270%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%212.86%212.86%21%21%211.81%211.81%21%402103244b17487820073372535e03d5%2112000018875273580%21sea%21AU%213080408886%21X&curPageLogUid=gbY9soG79bIv&utparam-url=scene%3Asearch%7Cquery_from%3A)  
 
 
 #### III. User Interface:  
