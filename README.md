@@ -1,4 +1,10 @@
 # ProjectBrewDev: FOSS Gaggia Classic Pro PID Controller
+**⚠️ IMPORTANT DISCLAIMER: WORK IN PROGRESS - DO NOT USE! ⚠️**  
+
+**This project is currently under active development and is NOT yet stable, complete, or tested for safety and reliability. The code and hardware designs shared here are experimental and intended for development and learning purposes only at this stage.**  
+
+**DO NOT attempt to install or use this system on your Gaggia Classic Pro or any other espresso machine in its current state. Doing so could result in damage to your machine, create an electrical hazard, or lead to unpredictable behavior.**  
+
 Project BrewDev is a DIY, open-source PID temperature controller and enhancement system specifically designed for the Gaggia Classic Pro espresso machine. It utilizes an ESP32 microcontroller to provide precise temperature control and additional features for an improved brewing experience.
 
 ## Project Goal
