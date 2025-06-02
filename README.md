@@ -55,7 +55,7 @@ Project BrewDev: V1 Component Checklist
 ##### For Steam Temperature:  
 
 
-{ } [K-Type Thermocouple Probe (ensure you have one compatible with the MAX31855)](https://www.aliexpress.com/item/1005005496786289.html?spm=a2g0o.productlist.main.1.7dd9236fusXsxI&algo_pvid=d2b3cf6a-636d-4870-9a61-269e426183fa&algo_exp_id=d2b3cf6a-636d-4870-9a61-269e426183fa-0&pdp_ext_f=%7B%22order%22%3A%22906%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%213.27%212.91%21%21%212.07%211.84%21%402103245417487774616223073e1561%2112000033327476707%21sea%21AU%213080408886%21X&curPageLogUid=iCr16ZWSsp3i&utparam-url=scene%3Asearch%7Cquery_from%3A)(Note:Ensure you pick k-type m4)
+{ } [K-Type Thermocouple Probe (ensure you have one compatible with the MAX31855)](https://www.aliexpress.com/item/1005005496786289.html?spm=a2g0o.productlist.main.1.7dd9236fusXsxI&algo_pvid=d2b3cf6a-636d-4870-9a61-269e426183fa&algo_exp_id=d2b3cf6a-636d-4870-9a61-269e426183fa-0&pdp_ext_f=%7B%22order%22%3A%22906%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%213.27%212.91%21%21%212.07%211.84%21%402103245417487774616223073e1561%2112000033327476707%21sea%21AU%213080408886%21X&curPageLogUid=iCr16ZWSsp3i&utparam-url=scene%3Asearch%7Cquery_from%3A)(Note:Ensure you pick k-type m4)  
 
 { } [MAX31855 Thermocouple Sensor Module](https://www.aliexpress.com/item/1902975189.html?spm=a2g0o.productlist.main.1.428e287cNdxcZy&algo_pvid=3b100b3c-6b06-4296-a7df-7b496b6c2fbe&algo_exp_id=3b100b3c-6b06-4296-a7df-7b496b6c2fbe-0&pdp_ext_f=%7B%22order%22%3A%2270%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%212.86%212.86%21%21%211.81%211.81%21%402103244b17487820073372535e03d5%2112000018875273580%21sea%21AU%213080408886%21X&curPageLogUid=gbY9soG79bIv&utparam-url=scene%3Asearch%7Cquery_from%3A)  
 
@@ -76,7 +76,8 @@ Project BrewDev: V1 Component Checklist
 #### IV. Power Supply & Control:  
 
 
-{ } [HLK-PM01 (5V 3W AC-DC Power Supply Module for ESP32 system)](https://www.aliexpress.com/item/1005006072424191.html?spm=a2g0o.productlist.main.4.5d461adc3hd6eq&algo_pvid=dc2a3b39-0f5c-4065-b766-0b1d8509b58a&algo_exp_id=dc2a3b39-0f5c-4065-b766-0b1d8509b58a-3&pdp_ext_f=%7B%22order%22%3A%2269%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%215.45%215.45%21%21%2124.81%2124.81%21%402103241117487787808572909ee1cc%2112000035600877318%21sea%21AU%213080408886%21X&curPageLogUid=CG40YkbqM723&utparam-url=scene%3Asearch%7Cquery_from%3A)
+{ } [HLK-PM01 (5V 3W AC-DC Power Supply Module for ESP32 system)](https://www.aliexpress.com/item/1005006072424191.html?spm=a2g0o.productlist.main.4.5d461adc3hd6eq&algo_pvid=dc2a3b39-0f5c-4065-b766-0b1d8509b58a&algo_exp_id=dc2a3b39-0f5c-4065-b766-0b1d8509b58a-3&pdp_ext_f=%7B%22order%22%3A%2269%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%215.45%215.45%21%21%2124.81%2124.81%21%402103241117487787808572909ee1cc%2112000035600877318%21sea%21AU%213080408886%21X&curPageLogUid=CG40YkbqM723&utparam-url=scene%3Asearch%7Cquery_from%3A)  
+
 { } [Solid State Relay (MAKE SURE TO GET DC-AC SSR-40A)](https://www.aliexpress.com/item/1005005837105164.html?spm=a2g0o.productlist.main.1.457f714bCzx2Ei&algo_pvid=ca326593-964b-4b6e-9b52-219a5dc736d2&algo_exp_id=ca326593-964b-4b6e-9b52-219a5dc736d2-0&pdp_ext_f=%7B%22order%22%3A%221473%22%2C%22eval%22%3A%221%22%7D&pdp_npi=4%40dis%21AUD%215.19%215.19%21%21%213.29%213.29%21%40210312d517487790839296128ee120%2112000034526092498%21sea%21AU%213080408886%21X&curPageLogUid=wvfErnjh160s&utparam-url=scene%3Asearch%7Cquery_from%3A)
 
 #### V. Interfacing Modules (for Gaggia Switches):
