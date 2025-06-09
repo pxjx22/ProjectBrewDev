@@ -7,9 +7,23 @@
 #include <Adafruit_MAX31865.h>   // For PT100 RTD Sensor (Brew)       
 #include <PID_v1.h>              // Brett Beauregard's PID library
 #include <U8g2lib.h>             // For the OLED display by olikraus
-#include <AiEsp32RotaryEncoder.h> // For the ESP32 specific Rotary Encoder
+#include <ESP32Encoder.h>        // For the ESP32 specific Rotary Encoder
 #include <Preferences.h>         // For saving settings on ESP32
 #include <Wire.h>                // For I2C communication (used by U8g2)
+
+
+// ===================================
+// --- Master Project Settings ---
+#define DEBUG_MODE false // Set to 'true' to disable heater output, 'false' for normal operation
+
+// --- Temp Boundaries for encoder ---
+#define BREW_TEMP_MIN 85.0
+#define BREW_TEMP_MAX 105.0
+#define STEAM_TEMP_MIN 120.0
+#define STEAM_TEMP_MAX 160.0
+// ===================================
+
+
 
 ///////////////////////////////////////////////////////////////////////
 // Pin Definitions (Using placeholders replace with actual ESP32 pins)
@@ -58,31 +72,21 @@ const int READY_LED_PIN = 27;
 // -----------------------------------------------------------------------------
 
 // --- Sensors ---
-// K-Type Thermocouple for Steam (MAX31855)
-// Uses hardware SPI with specified pins. Note: Adafruit_MAX31855 constructor can take all 3 SPI pins for software SPI
-// or just CS for hardware SPI (using default SPI). Let's be explicit for hardware SPI.
-// Adafruit_MAX31855 thermocouple_steam(SPI_SCK_PIN, MAX31855_CS_PIN_STEAM, SPI_MISO_PIN); // If using this constructor style for explicitness
-// OR, if the library defaults to using the global SPI object when only CS is passed:
+// 1. Create a pointer for our shared SPI bus object (VSPI)
+SPIClass * vspi = new SPIClass(VSPI);
 
-Adafruit_MAX31855 thermocouple_steam(MAX31855_CS_PIN_STEAM);
-
-
-// PT100 RTD Sensor for Brew (MAX31865)
-// Constructor for hardware SPI: Adafruit_MAX31865(cs_pin, mosi_pin, miso_pin, sck_pin)
-// Note: some Adafruit libraries allow passing just CS and assume default hardware SPI pins.
-// Let's use the explicit hardware SPI constructor to be clear.
-
-Adafruit_MAX31865 sensor_pt100_brew(MAX31865_CS_PIN_BREW, SPI_MOSI_PIN, SPI_MISO_PIN, SPI_SCK_PIN);
+// 2. Declare the sensor objects, telling each one to use our new 'vspi' bus
+Adafruit_MAX31855 thermocouple_steam(MAX31855_CS_PIN_STEAM, vspi);
+Adafruit_MAX31865 sensor_pt100_brew(MAX31865_CS_PIN_BREW, vspi);
 
 // --- OLED Display (U8g2) ---
 // Constructor for 1.3" SH1106 I2C OLED. U8G2_R0 = No rotation.
 
-U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
+U8G2_SH1106_128X64_NONAME_2_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
-// --- Rotary Encoder (AiEsp32RotaryEncoder) ---
-// Last parameter is for VCC, -1 means not used/needed for basic KY-040
-
-AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, -1);
+// --- Rotary Encoder ---
+ESP32Encoder encoder;
+long oldEncoderValue = 0; // We'll use this to track changes
 
 // --- PID Controller ---
 
@@ -132,13 +136,59 @@ bool steamSwitchState = false; // Current state of the Gaggia steam switch (LOW 
 
 // --- Shot Timer ---
 
+enum TimerState { STOPPED, RUNNING, FINISHED };
+TimerState shotTimerState = STOPPED;
 unsigned long shotStartTime = 0;
 unsigned long currentShotDuration = 0;
-bool shotTimerRunning = false;
+unsigned long shotFinishTime = 0;
+const unsigned long FLASH_DURATION = 5000; // 5 seconds
 
 // --- Ready LED ---
 
 bool systemReady = false;
+int lastButtonState = HIGH;
+
+static unsigned char logo_bitmap[] = {
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 0x1f, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0xfe, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe6,
+   0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc6, 0x61, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x06, 0x63, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04,
+   0x47, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0xc6, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x0c, 0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08,
+   0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xd8, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x30, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30,
+   0xf0, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe0, 0xf0, 0x7c, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0xc0, 0x01, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80,
+   0x03, 0xc0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x00, 0x03, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x02, 0x18, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x18, 0x0c, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x80,
+   0x01, 0x00, 0x18, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x00, 0x00, 0x0c, 0x00,
+   0x00, 0x00, 0x80, 0x7f, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0xf0, 0x01,
+   0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x80, 0x03, 0x00,
+   0x00, 0x00, 0x0e, 0x00, 0x00, 0xe0, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00,
+   0x00, 0x60, 0x00, 0x00, 0x00, 0x80, 0x03, 0x00, 0x00, 0x20, 0x00, 0x00,
+   0x00, 0xc0, 0x01, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00,
+   0x00, 0x20, 0x00, 0x00, 0x00, 0x60, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00,
+   0x00, 0x30, 0x00, 0x03, 0x00, 0x30, 0x00, 0x00, 0x00, 0x30, 0x00, 0x0f,
+   0x00, 0x30, 0x00, 0x00, 0x00, 0x10, 0x00, 0x38, 0x00, 0x30, 0x00, 0x00,
+   0x00, 0x18, 0x00, 0x70, 0x00, 0x10, 0x00, 0x00, 0x00, 0x18, 0x00, 0xe0,
+   0x00, 0x18, 0x00, 0x00, 0x00, 0x18, 0x00, 0xc0, 0x00, 0x18, 0x00, 0x00,
+   0x00, 0x08, 0x00, 0x80, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x80,
+   0x01, 0x0e, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x80, 0x01, 0x07, 0x00, 0x00,
+   0x00, 0x0c, 0x00, 0x80, 0x01, 0x03, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x80,
+   0x00, 0x03, 0x00, 0x00, 0x80, 0x0f, 0x00, 0xc0, 0x08, 0x03, 0x00, 0x00,
+   0xc0, 0x0c, 0x00, 0xc0, 0x18, 0x02, 0x00, 0x00, 0xc0, 0x08, 0x00, 0x60,
+   0x10, 0x06, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x30, 0x30, 0x06, 0x00, 0x00,
+   0xc0, 0x00, 0x00, 0x1c, 0x30, 0x0c, 0x00, 0x00, 0x80, 0x01, 0x00, 0xfe,
+   0x21, 0x3c, 0x00, 0x00, 0x00, 0x03, 0x00, 0x80, 0x63, 0x70, 0x00, 0x00,
+   0x00, 0x7e, 0x00, 0x00, 0x63, 0xc0, 0x00, 0x00, 0x00, 0xfc, 0x00, 0x00,
+   0xc6, 0xc0, 0x00, 0x00, 0x00, 0x80, 0xff, 0xff, 0x83, 0x7f, 0x00, 0x00,
+   0x00, 0x00, 0xfe, 0xff, 0x01, 0x3f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
 /////////////////
 ///// setup /////
@@ -147,6 +197,8 @@ bool systemReady = false;
 void setup() {
   // Start Serial communication for debugging (optional, but very helpful)
   Serial.begin(115200);
+  Serial.println("\n--- Setup Checkpoint Test ---");
+  pinMode(ROTARY_ENCODER_BUTTON_PIN, INPUT_PULLUP);
   unsigned long setupStartTime = millis();
   while (!Serial && (millis() - setupStartTime < 2000)) { // Wait a bit for serial to connect, but don't hang forever
     delay(100);
@@ -155,6 +207,7 @@ void setup() {
 
   // --- Initialize Preferences (Non-Volatile Storage) ---
   preferences.begin("brewdev", false); // "brewdev" namespace, false for R/W mode
+//preferences.clear();
   // Load saved setpoint temperatures (or use defaults if not found)
   brewSetTemperature = preferences.getDouble(prefs_brew_temp_key, 92.0); // Default 92.0°C
   steamSetTemperature = preferences.getDouble(prefs_steam_temp_key, 140.0); // Default 140.0°C
@@ -165,25 +218,24 @@ void setup() {
   //
   activeSetTemperature = brewSetTemperature; 
   currentMode = BREW_MODE; // Start in BREW, can switch based on Gaggia switches later
-
+  Serial.println("Checkpoint 1: Preferences OK");
   // --- Initialize Sensors ---
   // PT100 for Brew Temperature
-
+  // 1. Initialize the shared VSPI bus with your defined pins
+  vspi->begin(SPI_SCK_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, -1); // <<< ADD THIS LINE
+  Serial.println("Checkpoint 2: SPI Bus OK");
+ 
+  // 2. PT100 for Brew Temperature
   Serial.println("Initializing PT100 Brew Sensor (MAX31865)...");
-  if (!sensor_pt100_brew.begin()) { // Specify PT100 type
+  // This line is now modified to be cleaner, passing the wire type directly.
+  if (!sensor_pt100_brew.begin(MAX31865_3WIRE)) { // <<< MODIFIED LINE
     Serial.println("ERROR: Could not initialize PT100/MAX31865 for brew! Check wiring.");
-    // Consider how to handle this error more robustly
   } else {
-    // Configure for your PT100 wire type (2, 3, or 4 wire)
-    // Example for a 3-wire PT100:
-    sensor_pt100_brew.setWires(MAX31865_3WIRE); 
-    // You'll need to check your PT100 probe and MAX31865 module for how to set this.
-    // Other options: MAX31865_2WIRE, MAX31865_4WIRE
     Serial.println("PT100 Brew Sensor (MAX31865) initialized.");
   }
-  delay(250); // Short delay for sensor
+  delay(250);
   currentBrewTemperature = sensor_pt100_brew.temperature(PT100_RNOMINAL, PT100_RREF);
-
+ 
   // Check for faults with PT100 (more specific than just isnan)
 
   uint8_t fault = sensor_pt100_brew.readFault();
@@ -197,15 +249,15 @@ void setup() {
   }else {
     Serial.print("Initial Brew Temperature (PT100): "); Serial.print(currentBrewTemperature); Serial.println(" *C");
   }
+  Serial.println("Checkpoint 3: PT100 Sensor OK");
 
   // K-Type for Steam Temperature
-  Serial.println("Initializing K-Type Steam Thermocouple (MAX31855)...");
-  if (!thermocouple_steam.begin()) { // Assuming hardware SPI, this might not return a useful bool
-    Serial.println("Warning: MAX31855 thermocouple_steam.begin() called.");
-  }
+ Serial.println("Initializing K-Type Steam Thermocouple (MAX31855)...");
+  // This is now simplified, as the if() check was unreliable.
+  thermocouple_steam.begin(); // <<< MODIFIED LINE
 
   delay(250); // Short delay for sensors
-
+ 
   currentSteamTemperature = thermocouple_steam.readCelsius();
   if (isnan(currentSteamTemperature)) {
     Serial.println("ERROR: Could not read temperature from Steam Thermocouple! Check wiring.");
@@ -217,32 +269,32 @@ void setup() {
   // Set the generic currentTemperature for initial PID setup (defaults to brew)
 
   currentTemperature = currentBrewTemperature; 
+  Serial.println("Checkpoint 4: K-Type Sensor OK");
 
   // --- Initialize OLED Display (U8g2) ---
 
-Serial.println("Initializing I2C Bus for OLED...");
+  Serial.println("Initializing I2C Bus for OLED...");
   Wire.begin(OLED_SDA_PIN, OLED_SCL_PIN); // Explicitly initialize I2C with defined pins
-
+  Serial.println("Checkpoint 5: I2C Bus OK");
   Serial.println("Initializing OLED Display...");
   u8g2.begin();
-  u8g2.setFont(u8g2_font_ncenB08_tr); // Choose a font (ncenB08 is a nice readable one)
-  u8g2.clearBuffer();
-  u8g2.drawStr(0, 12, "Project BrewDev"); // Adjusted y-pos for typical 8px font height
-  u8g2.drawStr(0, 26, "Initializing...");
-  u8g2.sendBuffer();
-  delay(2000); // Show init message for 2 seconds
+  u8g2.setFont(u8g2_font_ncenB08_tr);
+  Serial.println("Checkpoint 6: U8g2 Library OK");
+// Call our new function to draw the logo
+  drawSplashScreen(); 
+// Keep the splash screen visible for 1.5 seconds
+  delay(1500);
+  Serial.println("Checkpoint 7: Splash Screen OK");
 
   // --- Initialize Rotary Encoder ---
+Serial.println("Initializing PCNT Encoder...");
+// Attach the new safe pins for rotation. Note the order: DT pin, CLK pin
+encoder.attachHalfQuad(ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_A_PIN);
 
-  Serial.println("Initializing Rotary Encoder...");
-  rotaryEncoder.begin();
-  // Set boundaries for temperature adjustment (e.g., 70°C to 150°C for brew/steam range)
-  // We can adjust these min/max values later. False means no wrap-around.
-  rotaryEncoder.setBoundaries(70, 150, false); 
-  rotaryEncoder.setEncoderValue(activeSetTemperature); // Set initial encoder value to the current active setpoint
-  rotaryEncoder.setAcceleration(250); // Lower is faster acceleration. 0 means no acceleration. 250 is moderate.
-  // rotaryEncoder.setKnobNotPressedValue(HIGH); // If your encoder button is active LOW (goes to GND when pressed), it's HIGH when not pressed. This is often default.
-
+// Set the starting count to match the loaded temperature
+  encoder.setCount(activeSetTemperature * 2);
+  oldEncoderValue = encoder.getCount();
+  Serial.println("Checkpoint 8: Encoder OK");
   // --- Initialize PID Controller ---
 
   Serial.println("Initializing PID Controller...");
@@ -252,6 +304,7 @@ Serial.println("Initializing I2C Bus for OLED...");
   brewPid.SetTunings(Kp_brew, Ki_brew, Kd_brew);
   brewPid.SetMode(AUTOMATIC); // Turn the PID on
   pidWindowStartTime = millis(); // Initialize PID window start time
+  Serial.println("Checkpoint 9: PID Controller OK");
 
   // --- Set Pin Modes ---
 
@@ -265,7 +318,9 @@ Serial.println("Initializing I2C Bus for OLED...");
   pinMode(GAGGIA_STEAM_SWITCH_PIN, INPUT_PULLUP); 
 
   pinMode(READY_LED_PIN, OUTPUT);
+  
   digitalWrite(READY_LED_PIN, LOW); // Ensure LED is off initially
+  Serial.println("Checkpoint 10: Pin Modes OK");
 
   Serial.println("Setup Complete. Project BrewDev is Ready!");
   u8g2.clearBuffer(); 
@@ -276,7 +331,11 @@ Serial.println("Initializing I2C Bus for OLED...");
 
   // Display initial temp
   u8g2.sendBuffer();
+
+  // CHECKPOINT pass
+  Serial.println("--- Setup Function Complete ---");
 }
+
 //////////////////////////////
 // loop() - Runs repeatedly //
 //////////////////////////////
@@ -284,26 +343,38 @@ Serial.println("Initializing I2C Bus for OLED...");
  void loop() {
   // --- 1- Read Gaggia Switch Inputs & Determine Mode ---
   updateOperationMode();
+  Serial.println("Loop CP1: updateOperationMode OK");
   // --- 2- Read Current Temperatures from Both Sensors ---
   readSensorTemperatures();
+  Serial.println("Loop CP2: readSensorTemperatures OK");
   // --- 3- Helper for all PID related updates
   processPidLogic();
+  Serial.println("Loop CP3: processPidLogic OK");
   // --- 4- SSR control
   controlSSR();
+  Serial.println("Loop CP4: controlSSR OK");
   // --- 5 - Encoder logic
   handleEncoderInput();
+  Serial.println("Loop CP5: handleEncoderInput OK");
   // --- 6 - Manage Shot Timer
   manageShotTimer();
+  Serial.println("Loop CP6: manageShotTimer OK");
   // --- 7 - Update "Ready" LED
   updateReadyLedState();
+  Serial.println("Loop CP7: updateReadyLedState OK");
   // --- 8 - Update OLED Display
   refreshOledDisplay();
+  Serial.println("Loop CP8: refreshOledDisplay OK");
+  // --- 9 - Log PID data for Tuning
+  logPidData();
+  Serial.println("Loop CP9: PIDLogACTIVE");
+ 
+  delay(150);
  }
 
-
-  // --------------------------------------------------------------------// Helper Functions // ------------------------------------------------//-------------------------------------------------------------------
-
-
+//----------------------------
+  // --- Helper Functions ---
+//----------------------------
 
 //////////////////////////
 // 1. READ SWITCH INPUT //
@@ -329,6 +400,7 @@ Serial.println("Initializing I2C Bus for OLED...");
     else if (currentMode == STEAM_MODE) Serial.println("STEAM");
   }
 }
+
 /////////////////////////////////
 // 2. Read Sensor Temperatures //
 /////////////////////////////////
@@ -362,7 +434,7 @@ void readSensorTemperatures() {
 /////////////////
 // 3.PID logic //
 /////////////////
-//
+
 void processPidLogic() {
   // Update PID Input (currentTemperature) based on Current Mode
   // This ensures the PID object uses the correct sensor data for its calculations.
@@ -387,7 +459,7 @@ void processPidLogic() {
       Serial.println("PID configured for STEAM Mode.");
       brewPid.SetMode(AUTOMATIC);    // Ensure PID is on
     }
-    rotaryEncoder.setEncoderValue(activeSetTemperature);
+    
     pidWindowStartTime = millis(); // Reset PID window
   }
 
@@ -417,19 +489,18 @@ void controlSSR() {
       pidWindowStartTime = now; 
     }
 
-    // pidOutput is the ON-time in ms for the current window (due to SetOutputLimits in setup)
+    // pidOutput is the ON-time in ms for the current window...
     if (pidOutput > (now - pidWindowStartTime)) {
-      digitalWrite(SSR_CONTROL_PIN, HIGH); // Turn SSR ON
-      // Serial.println("SSR ON"); // Debug
+      // Only turn the SSR ON if DEBUG_MODE is set to false
+      if (!DEBUG_MODE) {
+        digitalWrite(SSR_CONTROL_PIN, HIGH); // Turn SSR ON
+      }
     } else {
-      digitalWrite(SSR_CONTROL_PIN, LOW);  // Turn SSR OFF
-      // Serial.println("SSR OFF"); // Debug
-    }
-  } else { 
-    // This 'else' block should ideally not be reached if currentMode is always BREW or STEAM.
+      // This 'else' block should ideally not be reached if currentMode is always BREW or STEAM.
     // However, as a failsafe:
     digitalWrite(SSR_CONTROL_PIN, LOW); // Ensure SSR is OFF
     // Serial.println("SSR OFF - Failsafe (Unexpected Mode)"); // Debug
+    }
   }
 }
 
@@ -438,81 +509,83 @@ void controlSSR() {
 /////////////////////
 
 void handleEncoderInput() {
-  if (rotaryEncoder.encoderChanged()) {
-    long newEncoderValue = rotaryEncoder.readEncoder();
-    Serial.print("Encoder Value: "); Serial.println(newEncoderValue);
+  // Read the raw hardware count from the encoder (which represents half-degrees)
+  long newEncoderCount = encoder.getCount();
+
+  if (newEncoderCount != oldEncoderValue) {
+    // Convert the raw count into our temperature value by dividing by 2.0
+    double newTemperature = newEncoderCount / 2.0;
 
     if (currentMode == BREW_MODE) {
-      brewSetTemperature = (double)newEncoderValue;
-      activeSetTemperature = brewSetTemperature; // Ensure PID's setpoint is also updated live
-      preferences.putDouble(prefs_brew_temp_key, brewSetTemperature); // Save it
-      Serial.print("New Brew Set Temperature: "); Serial.println(brewSetTemperature);
-    } else if (currentMode == STEAM_MODE) {
-      steamSetTemperature = (double)newEncoderValue;
-      activeSetTemperature = steamSetTemperature; // Ensure PID's setpoint is also updated live
-      preferences.putDouble(prefs_steam_temp_key, steamSetTemperature); // Save it
-      Serial.print("New Steam Set Temperature: "); Serial.println(steamSetTemperature);
+      // Constrain the new value within our defined brew boundaries
+      brewSetTemperature = constrain(newTemperature, BREW_TEMP_MIN, BREW_TEMP_MAX);
+      activeSetTemperature = brewSetTemperature;
+    } else { // STEAM_MODE
+      // Constrain the new value within our defined steam boundaries
+      steamSetTemperature = constrain(newTemperature, STEAM_TEMP_MIN, STEAM_TEMP_MAX);
+      activeSetTemperature = steamSetTemperature;
     }
-    // Note: The PID's actual setpoint variable 'activeSetTemperature' is updated directly here.
-    // The PID object itself uses a *pointer* to 'activeSetTemperature', so it sees the change automatically.
+
+    // IMPORTANT: Re-sync the raw encoder count with the (potentially constrained) value
+    // This stops the counter from running away if you hit a boundary.
+    encoder.setCount(activeSetTemperature * 2);
+    oldEncoderValue = encoder.getCount(); 
   }
 
-  if (rotaryEncoder.isEncoderButtonClicked()) {
-    // Encoder button clicked, but no specific action defined for V1 yet (Option B from our discussion).
-    // Serial.println("Encoder Button Clicked! (No V1 action)"); // Optional debug
-  }
+  // --- Logic for button click (with robust debouncing) ---
+  int currentButtonState = digitalRead(ROTARY_ENCODER_BUTTON_PIN);
+  if (currentButtonState == LOW && lastButtonState == HIGH) {
+    Serial.println("Encoder button pressed! Saving settings...");
+    preferences.putDouble(prefs_brew_temp_key, brewSetTemperature);
+    preferences.putDouble(prefs_steam_temp_key, steamSetTemperature);
 
-  // Optional: Check for long press or other button events if needed from AiEsp32RotaryEncoder
-  // if (rotaryEncoder.isEncoderButtonLongPressed()) {
-  //   Serial.println("Encoder Button Long Pressed!");
-  // }
+    u8g2.setCursor(80, 54); 
+    u8g2.print("Saved!");
+    u8g2.sendBuffer();
+    delay(1000); 
+    delay(50); 
+  }
+  lastButtonState = currentButtonState;
 }
+
 
 //////////////////////////
 // 6. Manage Shot Timer //
 //////////////////////////
 
 void manageShotTimer() {
-  // brewSwitchState is global and updated by updateOperationMode()
-  // It's true if the Gaggia's brew switch is ON (active LOW)
-
+  // Check if the brew switch is ON
   if (brewSwitchState) {
-    // Brew switch is ON
-    if (!shotTimerRunning) {
-      // Timer was not running, so let's start it
-      shotTimerRunning = true;
+    // If the timer was stopped, start it now
+    if (shotTimerState == STOPPED) {
+      shotTimerState = RUNNING;
       shotStartTime = millis();
-      currentShotDuration = 0; // Reset duration at the start of a new shot
+      currentShotDuration = 0;
       Serial.println("Shot Timer Started.");
-    } else {
-      // Timer is already running, update the duration
+    }
+    // If it's running, update the duration
+    if (shotTimerState == RUNNING) {
       currentShotDuration = millis() - shotStartTime;
     }
   } else {
-    // Brew switch is OFF
-    if (shotTimerRunning) {
-      // Timer was running, so let's stop it
-      shotTimerRunning = false;
-      Serial.print("Shot Timer Stopped. Final Duration: ");
-      Serial.print(currentShotDuration / 1000.0, 1); // Display in seconds with one decimal
-      Serial.println("s");
-      // The requirement is "resets when brew switch is off".
-      currentShotDuration = 0; 
-    }
-    // Ensure it's always 0 when the switch is off as per "resets when brew switch is off"
-    if (!shotTimerRunning && currentShotDuration != 0) { 
-        currentShotDuration = 0;
+    // If the brew switch is OFF...
+    // ...and the timer was running, switch it to the FINISHED state
+    if (shotTimerState == RUNNING) {
+      shotTimerState = FINISHED;
+      shotFinishTime = millis(); // Record the time we finished
+      Serial.print("Shot Timer Finished. Final Duration: ");
+      Serial.println(currentShotDuration / 1000.0, 1);
     }
   }
 
-  // Optional: For debugging, print currentShotDuration every second if running
-  // static unsigned long lastTimerPrintTime = 0;
-  // if (shotTimerRunning && (millis() - lastTimerPrintTime > 1000)) {
-  //   Serial.print("Shot Duration: "); Serial.print(currentShotDuration / 1000.0, 1); Serial.println("s");
-  //   lastTimerPrintTime = millis();
-  // }
+  // If the timer is in the FINISHED state, check if 5 seconds have passed
+  if (shotTimerState == FINISHED && millis() - shotFinishTime > FLASH_DURATION) {
+    // After 5 seconds, stop it completely and reset
+    shotTimerState = STOPPED;
+    currentShotDuration = 0;
+    Serial.println("Finished display timeout. Timer reset.");
+  }
 }
-
 /////////////////////////
 // 7. Update Ready LED //
 /////////////////////////
@@ -545,54 +618,126 @@ void updateReadyLedState() {
   }
 }
 
+
+
 /////////////////////////////
 // 8. Refresh OLED Display //
 /////////////////////////////
-
 void refreshOledDisplay() {
-  // Periodically updates the display (e.g., every 100ms)
-  static unsigned long lastDisplayUpdateTime = 0; // Static to retain value across calls
+  static unsigned long lastDisplayUpdateTime = 0;
+  if (millis() - lastDisplayUpdateTime > 50) {
+    lastDisplayUpdateTime = millis();
+
+    char buffer[20]; 
+
+    u8g2.firstPage();
+    do {
+      // --- STATUS BAR (TOP ROW) ---
+      u8g2.setFont(u8g2_font_unifont_t_symbols);
+      if (DEBUG_MODE) { u8g2.drawGlyph(0, 12, 0x2699); } 
+      else {
+        if (currentMode == BREW_MODE) { u8g2.drawGlyph(0, 12, 0x2615); } 
+        else { u8g2.drawGlyph(0, 12, 0x2601); }
+      }
+      u8g2.setFont(u8g2_font_prospero_bold_nbp_tr); 
+      const char *title = "BrewDev";
+      int textWidth = u8g2.getStrWidth(title);
+      int textX = (128 - textWidth) / 2;
+      u8g2.drawBox(textX - 4, 1, textWidth + 8, 12);
+      u8g2.setDrawColor(0);
+      u8g2.drawStr(textX, 11, title);
+      u8g2.setDrawColor(1);
+      u8g2.setFont(u8g2_font_ncenB08_tr); 
+      u8g2.drawHLine(0, 14, 128);
+
+      // --- MAIN TEMPERATURE DISPLAY (MIDDLE) ---
+      // Switched to a slightly smaller, 24-pixel font to make more room
+      u8g2.setFont(u8g2_font_logisoso24_tr); 
+      // Use a wider buffer for safety with negative numbers
+      dtostrf(currentTemperature, 6, 1, buffer);
+      textWidth = u8g2.getStrWidth(buffer);
+      int numberX = (128 - textWidth) / 2;
+      // Adjusted y-position to re-center the smaller font
+      u8g2.drawStr(numberX, 48, buffer);
+
+      // Draw the Celsius symbol
+      u8g2.setFont(u8g2_font_ncenB08_tr);
+      // Adjusted y-position to align with the new font size
+      u8g2.setCursor(numberX + textWidth, 38); 
+      u8g2.print((char)176); // Degree symbol °
+      u8g2.print("C");
+
+      // --- BOTTOM ROW INFO ---
+      u8g2.setCursor(0, 64);
+      u8g2.print("Set: ");
+      u8g2.print(activeSetTemperature, 1);
+      
+      // --- CONTEXT-SENSITIVE STATUS ON THE RIGHT ---
+      if (shotTimerState == RUNNING) {
+        sprintf(buffer, "T: %.1fs", (float)(currentShotDuration / 1000.0));
+        u8g2.drawStr(74, 64, buffer);
+      } else if (shotTimerState == FINISHED) {
+        if ((millis() / 500) % 2 == 0) {
+          sprintf(buffer, "T: %.1fs", (float)(currentShotDuration / 1000.0));
+          u8g2.drawStr(74, 64, buffer);
+        }
+      } else if (systemReady) {
+        u8g2.drawStr(74, 64, "Ready!");
+      } else {
+        // Segmented Power Meter
+        u8g2.setFont(u8g2_font_unifont_t_symbols);
+        u8g2.drawGlyph(74, 64, 0x1F525); // Flame icon 🔥
+        u8g2.setFont(u8g2_font_ncenB08_tr);
+        int segments = map(pidOutput, 0, pidWindowSize, 0, 5);
+        int segment_width = 6;
+        int segment_height = 8;
+        int segment_spacing = 1;
+        int start_x = 90;
+        int start_y = 56;
+        for (int i = 0; i < 5; i++) {
+          u8g2.drawFrame(start_x + (i * (segment_width + segment_spacing)), start_y, segment_width, segment_height);
+        }
+        if (segments > 0) {
+          for (int i = 0; i < segments; i++) {
+            u8g2.drawBox(start_x + (i * (segment_width + segment_spacing)), start_y, segment_width, segment_height);
+          }
+        }
+      }
+      
+    } while (u8g2.nextPage());
+  }
+}
+
+
+//////////////////////
+// 9. Splash Screen //
+//////////////////////
+
+void drawSplashScreen() {
+  u8g2.firstPage();
+  do {
+    // All drawing commands MUST go inside this do...while loop for Full Frame Buffer mode.
+    u8g2.drawXBM( (128 - 60) / 2, (64 - 60) / 2, 60, 60, logo_bitmap);
+  } while (u8g2.nextPage());
+}
+
+
+
+//////////////////////
+// 10. Log PID data for tuning //
+//////////////////////
+
+void logPidData() {
+  // This function prints the key variables in a comma-separated format
+  // that can be easily graphed by the Arduino Serial Plotter.
   
-  if (millis() - lastDisplayUpdateTime > 100) { // Update display every 100ms
-    lastDisplayUpdateTime = millis(); // Reset the timer for the next update
-
-    u8g2.clearBuffer(); // Clear the internal memory
-
-    // Line 1: Display Mode
-    u8g2.setCursor(0, 12); 
-    u8g2.print("Mode: ");
-    if (currentMode == BREW_MODE) {
-      u8g2.print("BREW");
-    } else if (currentMode == STEAM_MODE) {
-      u8g2.print("STEAM");
-    }
-
-    // Line 2: Display Current Actual Temperature
-    u8g2.setCursor(0, 26);
-    u8g2.print("Actual: ");
-    u8g2.print(currentTemperature, 1); 
-    u8g2.print((char)176); 
-    u8g2.print("C");
-
-    // Line 3: Display Setpoint Temperature
-    u8g2.setCursor(0, 40);
-    u8g2.print("Set:    "); 
-    u8g2.print(activeSetTemperature, 1); 
-    u8g2.print((char)176);
-    u8g2.print("C");
-
-    // Line 4: Display Shot Timer and Ready Status
-    u8g2.setCursor(0, 54);
-    u8g2.print("Timer: ");
-    float durationInSeconds = currentShotDuration / 1000.0;
-    u8g2.print(durationInSeconds, 1);
-    u8g2.print("s");
-
-    if (systemReady) {
-      u8g2.setCursor(80, 54); 
-      u8g2.print("READY");
-    }
-    
-    u8g2.sendBuffer(); // Transfer internal memory to the display
-  } 
+  Serial.print(activeSetTemperature);
+  Serial.print(",");
+  Serial.print(currentTemperature);
+  Serial.print(",");
+  
+  // We scale the pidOutput (0-5000) to be on the same rough scale as the temperature
+  // for easier graphing. This is for display only.
+  double scaledOutput = map(pidOutput, 0, pidWindowSize, 0, 150);
+  Serial.println(scaledOutput);
 }
