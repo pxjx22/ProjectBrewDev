@@ -1,10 +1,11 @@
-// Project BrewDev - FOSS Gaggia Controller
+
+ // Project BrewDev - FOSS Gaggia Controller
 // -----------------------------------------------------------------------------
 // Includes
 // -----------------------------------------------------------------------------
 #include <SPI.h>                 // Standard SPI library, often used by MAX31855
+#include <max6675.h> // For Steam (K-Type via MAX6675)
 #include <Adafruit_MAX31855.h>   // For the MAX31855 TC sensor
-#include <Adafruit_MAX31865.h>   // For PT100 RTD Sensor (Brew)       
 #include <PID_v1.h>              // Brett Beauregard's PID library
 #include <U8g2lib.h>             // For the OLED display by olikraus
 #include <ESP32Encoder.h>        // For the ESP32 specific Rotary Encoder
@@ -20,7 +21,7 @@
 #define BREW_TEMP_MIN 85.0
 #define BREW_TEMP_MAX 105.0
 #define STEAM_TEMP_MIN 120.0
-#define STEAM_TEMP_MAX 160.0
+#define STEAM_TEMP_MAX 155.0
 // ===================================
 
 
@@ -46,9 +47,12 @@ const int SPI_MOSI_PIN = 23; // ESP32's VSPI MOSI (Needed for MAX31865)
 // Default HSPI for ESP32 are usually: MISO=12, MOSI=13, SCK=14. CS is defined below.
 
 // Chip Select (CS) Pins
-const int MAX31855_CS_PIN_STEAM = 4;  // CS for K-type Steam Thermocouple (MAX31855) - using your previous example pin
-const int MAX31865_CS_PIN_BREW  = 5;  // CS for PT100 Brew Sensor (MAX31865) - using your previous example pin
-// // OLED Display (I2C)
+ const int MAX6675_CS_PIN_STEAM = 4; //Steam PIN 
+const int MAX31855_CS_PIN_BREW  = 5;   // Brew PIN
+
+
+// OLED Display (I2C)
+
 const int OLED_SDA_PIN = 21;
 const int OLED_SCL_PIN = 22;
 
@@ -76,8 +80,9 @@ const int READY_LED_PIN = 27;
 SPIClass * vspi = new SPIClass(VSPI);
 
 // 2. Declare the sensor objects, telling each one to use our new 'vspi' bus
-Adafruit_MAX31855 thermocouple_steam(MAX31855_CS_PIN_STEAM, vspi);
-Adafruit_MAX31865 sensor_pt100_brew(MAX31865_CS_PIN_BREW, vspi);
+
+MAX6675 thermocouple_steam(SPI_SCK_PIN, MAX6675_CS_PIN_STEAM, SPI_MISO_PIN);
+Adafruit_MAX31855 thermocouple_brew(MAX31855_CS_PIN_BREW, vspi);
 
 // --- OLED Display (U8g2) ---
 // Constructor for 1.3" SH1106 I2C OLED. U8G2_R0 = No rotation.
@@ -219,58 +224,31 @@ void setup() {
   activeSetTemperature = brewSetTemperature; 
   currentMode = BREW_MODE; // Start in BREW, can switch based on Gaggia switches later
   Serial.println("Checkpoint 1: Preferences OK");
+
   // --- Initialize Sensors ---
-  // PT100 for Brew Temperature
-  // 1. Initialize the shared VSPI bus with your defined pins
-  vspi->begin(SPI_SCK_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, -1); // <<< ADD THIS LINE
-  Serial.println("Checkpoint 2: SPI Bus OK");
- 
-  // 2. PT100 for Brew Temperature
-  Serial.println("Initializing PT100 Brew Sensor (MAX31865)...");
-  // This line is now modified to be cleaner, passing the wire type directly.
-  if (!sensor_pt100_brew.begin(MAX31865_3WIRE)) { // <<< MODIFIED LINE
-    Serial.println("ERROR: Could not initialize PT100/MAX31865 for brew! Check wiring.");
-  } else {
-    Serial.println("PT100 Brew Sensor (MAX31865) initialized.");
-  }
-  delay(250);
-  currentBrewTemperature = sensor_pt100_brew.temperature(PT100_RNOMINAL, PT100_RREF);
- 
-  // Check for faults with PT100 (more specific than just isnan)
+Serial.println("Initializing VSPI Bus...");
+vspi->begin(SPI_SCK_PIN, SPI_MISO_PIN, SPI_MOSI_PIN, -1); // IMPORTANT: Start the SPI bus!
 
-  uint8_t fault = sensor_pt100_brew.readFault();
-  if (fault) {
-    Serial.print("Fault detected on PT100 Brew Sensor: 0x"); Serial.println(fault, HEX);
-    sensor_pt100_brew.clearFault(); // Clear the fault
-    currentBrewTemperature = -1; // Error value
-  } else if (isnan(currentBrewTemperature)) { // Fallback isnan check
-     Serial.println("ERROR: Brew temperature is NaN after PT100 init! Check wiring/RREF.");
-     currentBrewTemperature = -1; // Error value
-  }else {
-    Serial.print("Initial Brew Temperature (PT100): "); Serial.print(currentBrewTemperature); Serial.println(" *C");
-  }
-  Serial.println("Checkpoint 3: PT100 Sensor OK");
+Serial.println("Initializing Brew Thermocouple (MAX31855)...");
+thermocouple_brew.begin();
+delay(250);
+currentBrewTemperature = thermocouple_brew.readCelsius();
 
-  // K-Type for Steam Temperature
- Serial.println("Initializing K-Type Steam Thermocouple (MAX31855)...");
-  // This is now simplified, as the if() check was unreliable.
-  thermocouple_steam.begin(); // <<< MODIFIED LINE
+if (isnan(currentBrewTemperature)) {
+    Serial.println("ERROR: Could not read temperature from Brew Thermocouple! Check wiring.");
+    currentBrewTemperature = -1;
+} else {
+    Serial.print("Initial Brew Temperature (K-Type): ");
+    Serial.print(currentBrewTemperature);
+    Serial.println(" *C");
+}
+Serial.println("Checkpoint 3: Brew Sensor OK");
 
-  delay(250); // Short delay for sensors
- 
-  currentSteamTemperature = thermocouple_steam.readCelsius();
-  if (isnan(currentSteamTemperature)) {
-    Serial.println("ERROR: Could not read temperature from Steam Thermocouple! Check wiring.");
-    currentSteamTemperature = -1; // Error value
-  } else {
-    Serial.print("Initial Steam Temperature (K-Type): "); Serial.print(currentSteamTemperature); Serial.println(" *C");
-  }
-
-  // Set the generic currentTemperature for initial PID setup (defaults to brew)
-
-  currentTemperature = currentBrewTemperature; 
-  Serial.println("Checkpoint 4: K-Type Sensor OK");
-
+// --- Steam sensor code temporarily disabled ---
+// Serial.println("Initializing Steam Thermocouple (MAX6675)...");
+currentSteamTemperature = 0; // Set to 0 as a safe default
+currentTemperature = currentBrewTemperature;
+Serial.println("Checkpoint 4: Sensors configured for Brew-Only mode.");
   // --- Initialize OLED Display (U8g2) ---
 
   Serial.println("Initializing I2C Bus for OLED...");
@@ -380,9 +358,9 @@ encoder.attachHalfQuad(ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_A_PIN);
 // 1. READ SWITCH INPUT //
 //////////////////////////
 
-  void updateOperationMode() {
-  // Read Gaggia Switch Inputs
-  // Assuming brewSwitchState and steamSwitchState are global, or pass them if local
+void updateOperationMode() {
+  // Reading the state of the switches.
+  // A LOW signal means the switch is ON.
   brewSwitchState = (digitalRead(GAGGIA_BREW_SWITCH_PIN) == LOW);
   steamSwitchState = (digitalRead(GAGGIA_STEAM_SWITCH_PIN) == LOW);
 
@@ -394,6 +372,7 @@ encoder.attachHalfQuad(ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_A_PIN);
     currentMode = BREW_MODE;
   }
 
+  // This part of the code for logging changes is fine.
   if (currentMode != previousMode) {
     Serial.print("Mode changed to: ");
     if (currentMode == BREW_MODE) Serial.println("BREW");
@@ -406,29 +385,18 @@ encoder.attachHalfQuad(ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_A_PIN);
 /////////////////////////////////
 
 void readSensorTemperatures() {
-
-  // Brew Temperature (PT100 via MAX31865)
-
-  double brewTempReading = sensor_pt100_brew.temperature(PT100_RNOMINAL, PT100_RREF);
-  uint8_t brewFault = sensor_pt100_brew.readFault();
-  if (brewFault) {
-    Serial.print("Fault detected on PT100 Brew Sensor in loop: 0x"); Serial.println(brewFault, HEX);
-    sensor_pt100_brew.clearFault();
-    // Optionally set currentBrewTemperature to an error value or handle more robustly
-  } else if (!isnan(brewTempReading)) {
+  // Read the working brew sensor (MAX31855)
+  double brewTempReading = thermocouple_brew.readCelsius();
+  if (!isnan(brewTempReading)) {
     currentBrewTemperature = brewTempReading;
   } else {
-    Serial.println("Warning: Failed to read valid temperature from Brew PT100 in loop!");
+    Serial.println("Warning: Failed to read valid temperature from Brew K-Type in loop!");
+    currentBrewTemperature = -1; // Set error value
   }
 
-  // Steam Temperature (K-Type via MAX31855)
-
-  double steamTempReading = thermocouple_steam.readCelsius();
-  if (!isnan(steamTempReading)) {
-    currentSteamTemperature = steamTempReading;
-  } else {
-    Serial.println("Warning: Failed to read valid temperature from Steam K-Type in loop!");
-  }
+  // For our temporary single-sensor mode, the steam temperature value is just a placeholder.
+  // We do not read from the MAX6675 at all.
+  currentSteamTemperature = 0;
 }
 
 /////////////////
@@ -436,40 +404,25 @@ void readSensorTemperatures() {
 /////////////////
 
 void processPidLogic() {
-  // Update PID Input (currentTemperature) based on Current Mode
-  // This ensures the PID object uses the correct sensor data for its calculations.
-  if (currentMode == BREW_MODE) {
-    currentTemperature = currentBrewTemperature; 
-  } else if (currentMode == STEAM_MODE) {
-    currentTemperature = currentSteamTemperature;
-  }
-  // Now 'currentTemperature' holds the reading from the sensor relevant to the current mode.
+  // CRITICAL: For our temporary single-sensor mode, the PID input
+  // is ALWAYS the reliable brew temperature sensor.
+  currentTemperature = currentBrewTemperature; 
 
-  // Update PID Controller based on Mode (if mode has changed)
-
+  // This logic correctly switches the SETPOINT and TUNINGS when you press the steam button.
   if (currentMode != previousMode) { 
     if (currentMode == BREW_MODE) {
       activeSetTemperature = brewSetTemperature;
-      brewPid.SetTunings(Kp_brew, Ki_brew, Kd_brew); // Apply brew tunings
+      brewPid.SetTunings(Kp_brew, Ki_brew, Kd_brew);
       Serial.println("PID configured for BREW Mode.");
-      brewPid.SetMode(AUTOMATIC);    // Ensure PID is on
     } else if (currentMode == STEAM_MODE) { 
-      activeSetTemperature = steamSetTemperature;
+      // Use the steam setpoint, but the input is still the brew sensor
+      activeSetTemperature = steamSetTemperature; 
       brewPid.SetTunings(Kp_steam, Ki_steam, Kd_steam); 
-      Serial.println("PID configured for STEAM Mode.");
-      brewPid.SetMode(AUTOMATIC);    // Ensure PID is on
+      Serial.println("PID configured for temporary STEAM Mode (using Brew Sensor).");
     }
-    
-    pidWindowStartTime = millis(); // Reset PID window
+    pidWindowStartTime = millis();
   }
-
-  // PID computation should happen every loop now that we are always in an active mode
-
-  bool computed = brewPid.Compute();
-  if (computed) {
-    // A good place for debugging PID output if needed later:
-    // Serial.print("PID Output: "); Serial.println(pidOutput); 
-  }
+  brewPid.Compute();
 }
 
 ////////////////////
@@ -480,6 +433,8 @@ void controlSSR() {
   // Control the SSR (Heating Element) using Time-Proportioned Window
   unsigned long now = millis();
   
+   Serial.print("PID Output: "); Serial.println(pidOutput);
+
   if (currentMode == BREW_MODE || currentMode == STEAM_MODE) {
     // Time-proportioned PID output control
     if (now - pidWindowStartTime >= pidWindowSize) { // Use >= to be precise
@@ -741,3 +696,4 @@ void logPidData() {
   double scaledOutput = map(pidOutput, 0, pidWindowSize, 0, 150);
   Serial.println(scaledOutput);
 }
+
