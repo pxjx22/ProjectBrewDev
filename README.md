@@ -31,7 +31,6 @@ The initial V1 release of Project BrewDev aims to implement the following core f
 - [ ] Perform systematic hardware validation of all V1 components on a stable power rail.
 - [ ] Complete PID tuning for both brew and steam modes.
 - [ ] Write a detailed, step-by-step build guide with photos and clear schematics.
-- [ ] Design and test a 3D printable enclosure for the external controller.
 - [ ] Clean up, comment, and optimize the V1 firmware for public release.
 - [ ] **Future:** Explore V2 features like pressure profiling, flow control, and pre-infusion.
 
